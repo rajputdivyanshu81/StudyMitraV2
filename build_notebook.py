@@ -147,9 +147,17 @@ print("Downloading spaCy English NER model...")
 subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_sm", "-q"], check=False)
 
 print("\\n[OK] All dependencies installed successfully!")
-print("   Restart runtime if torch/CUDA version errors appear")
+print("   Runtime will now restart automatically to load new packages...")
+print("   After restart: Run cells from Cell 2 onwards (skip Cell 1)")
+
+# Auto-restart runtime so newly installed packages are importable
+# This is required in Colab after pip install
+import os, time
+time.sleep(2)
+os.kill(os.getpid(), 9)
 '''
 cells.append(code(CELL1_CODE))
+
 
 # =============================================================================
 # CELL 2 MARKDOWN
