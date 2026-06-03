@@ -191,13 +191,33 @@ CELL2_CODE = '''\
 # CELL 2: IMPORTS & GLOBAL CONFIGURATION
 # ============================================================
 
-import os, gc, re, json, time, warnings, subprocess, logging
+import os, gc, re, json, time, warnings, subprocess, logging, sys
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
 
 warnings.filterwarnings("ignore")
 logging.basicConfig(level=logging.WARNING)
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+# ── Inline install fallback (in case Cell 1 packages didn't survive restart) ──
+def _ensure(pkg, import_name=None):
+    """Install pkg if not importable. Handles Colab post-restart package loss."""
+    name = import_name or pkg.split("==")[0].replace("-", "_")
+    try:
+        __import__(name)
+    except ImportError:
+        print(f"[Setup] Installing missing package: {pkg}")
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q", pkg], check=False)
+
+_ensure("jiwer==3.0.3",          "jiwer")
+_ensure("rouge-score",            "rouge_score")
+_ensure("faster-whisper==1.0.3",  "faster_whisper")
+_ensure("keybert==0.8.4",         "keybert")
+_ensure("sentence-transformers",  "sentence_transformers")
+_ensure("yake",                   "yake")
+_ensure("transformers==4.44.0",   "transformers")
+_ensure("gradio==4.42.0",         "gradio")
+_ensure("gradio_client==0.9.1",   "gradio_client")
 
 import torch
 import numpy as np
@@ -211,6 +231,7 @@ import jiwer
 from rouge_score import rouge_scorer as rouge_scorer_lib
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+
 
 nltk.download("punkt",     quiet=True)
 nltk.download("punkt_tab", quiet=True)
