@@ -1562,7 +1562,73 @@ print("     QA F1  : token-bag intersection (SQuAD evaluation style)")
 cells.append(code(CELL9_CODE))
 
 # =============================================================================
+# CELL 9.5 — GRADIO MONKEY-PATCH (bool-schema fix)
+# =============================================================================
+cells.append(md(
+"## Cell 9.5 - Gradio Compatibility Patch\n"
+"\n"
+"### Why This Patch Is Needed\n"
+"\n"
+"Gradio's `get_api_info()` crashes with:\n"
+"```\n"
+"TypeError: argument of type 'bool' is not iterable\n"
+"```\n"
+"when components like `gr.File`, `gr.Slider`, or `gr.Radio` emit JSON schemas\n"
+"with `additionalProperties: true` (a Python `bool`).\n"
+"\n"
+"The internal check `if 'const' in schema` fails because Python cannot apply\n"
+"`in` to a boolean.\n"
+"\n"
+"**Fix: Monkey-patch `gradio_client.utils._json_schema_to_python_type`**\n"
+"to safely return `'Any'` whenever `schema` is a boolean instead of a dict.\n"
+"This is safe — boolean schemas mean 'accept anything' in JSON Schema spec."
+))
+
+CELL95_CODE = '''\
+# ============================================================
+# CELL 9.5: GRADIO COMPATIBILITY PATCH
+# Fixes: TypeError: argument of type 'bool' is not iterable
+# Root cause: gr.File / gr.Slider emit additionalProperties:true
+#             and gradio_client tries "const" in <bool>, which fails.
+# Solution: Monkey-patch _json_schema_to_python_type to guard booleans.
+# ============================================================
+
+import gradio_client.utils as _gcu
+
+_original_schema_fn = _gcu._json_schema_to_python_type
+
+def _safe_json_schema_to_python_type(schema, defs=None):
+    """
+    Patched version of gradio_client._json_schema_to_python_type.
+
+    JSON Schema allows boolean schemas:
+        true  -> accept any value
+        false -> reject any value
+    The original gradio_client code does not handle this case,
+    causing a TypeError when it tries to do 'const' in <bool>.
+
+    This patch returns 'Any' for boolean schemas (correct per JSON Schema spec).
+    """
+    if isinstance(schema, bool):
+        return "Any"
+    # Also guard dict schemas that have additionalProperties as a bool
+    if isinstance(schema, dict):
+        if "additionalProperties" in schema and isinstance(schema["additionalProperties"], bool):
+            schema = {**schema, "additionalProperties": {"type": "object"}}
+    return _original_schema_fn(schema, defs)
+
+# Apply the patch
+_gcu._json_schema_to_python_type = _safe_json_schema_to_python_type
+
+print("[OK] Gradio bool-schema patch applied")
+print("     gradio_client._json_schema_to_python_type now handles bool schemas safely")
+print("     This eliminates the 'TypeError: argument of type bool is not iterable' error")
+'''
+cells.append(code(CELL95_CODE))
+
+# =============================================================================
 # CELL 10 MARKDOWN
+
 # =============================================================================
 cells.append(md(
 "## Cell 10 - Gradio Interface (6-Tab UI)\n"
