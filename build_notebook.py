@@ -120,7 +120,9 @@ print("Installing Python packages...")
 subprocess.run([
     sys.executable, "-m", "pip", "install", "-q",
     "faster-whisper==1.0.3",
-    "gradio==4.44.0",
+    "gradio==4.42.0",
+    "gradio_client==0.9.1",   # Must match gradio version - fixes bool-schema TypeError
+
     "transformers==4.44.0",
     "torch", "torchvision", "torchaudio",
     "--extra-index-url", "https://download.pytorch.org/whl/cu121",
@@ -1614,14 +1616,14 @@ transcript_cache = {"text": "", "segments": [], "timestamped": ""}
 # ─────────────────────────────────────────────────────────────
 # TAB 1: TRANSCRIBE
 # ─────────────────────────────────────────────────────────────
-def run_transcribe(audio_file, model_choice, enable_vad, detect_lang):
+def run_transcribe(audio_file, model_choice, vad_choice, detect_lang):
     """
     Full pipeline: audio file -> FFmpeg extraction -> faster-whisper transcription.
 
     Args:
         audio_file  : Uploaded file (Gradio returns temp file path)
         model_choice: "large-v3 (GPU)" or "base (CPU)"
-        enable_vad  : Boolean - enable Silero VAD
+        vad_choice  : "VAD Enabled" or "VAD Disabled" (Radio, avoids Checkbox bool-schema bug)
         detect_lang : "Auto-detect" or specific language
 
     Returns:
@@ -1642,12 +1644,15 @@ def run_transcribe(audio_file, model_choice, enable_vad, detect_lang):
         # Step 3: Language
         lang = None if detect_lang == "Auto-detect" else detect_lang.lower()[:2]
 
-        # Step 4: Transcription
+        # Step 4: VAD toggle (gr.Radio string -> bool)
+        use_vad = (vad_choice == "VAD Enabled")
+
+        # Step 5: Transcription
         result = transcribe_audio(
             wav_path,
             model_size=size,
             language=lang,
-            vad_filter=enable_vad,
+            vad_filter=use_vad,
         )
 
         # Cache for other tabs
@@ -1831,7 +1836,11 @@ with gr.Blocks(
                                         file_types=[".mp4",".mkv",".webm",".mp3",".wav",".flac",".m4a"])
                     t1_model  = gr.Radio(["large-v3 (GPU - Best)", "base (CPU - Fast)"],
                                          value="large-v3 (GPU - Best)", label="Whisper Model")
-                    t1_vad    = gr.Checkbox(value=True, label="Enable VAD (removes silence, improves WER)")
+                    t1_vad    = gr.Radio(
+                        ["VAD Enabled", "VAD Disabled"],
+                        value="VAD Enabled",
+                        label="Voice Activity Detection (removes silence, improves WER)",
+                    )
                     t1_lang   = gr.Dropdown(
                         ["Auto-detect","English","Hindi","French","German","Spanish","Arabic"],
                         value="Auto-detect", label="Force Language (optional)")
