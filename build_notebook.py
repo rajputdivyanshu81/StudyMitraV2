@@ -121,7 +121,7 @@ subprocess.run([
     sys.executable, "-m", "pip", "install", "-q",
     "faster-whisper==1.0.3",
     "gradio==4.42.0",
-    "gradio_client==0.9.1",   # Must match gradio version - fixes bool-schema TypeError
+    # gradio_client auto-installed by gradio as a dependency
 
     "transformers==4.44.0",
     "torch", "torchvision", "torchaudio",
@@ -217,7 +217,7 @@ _ensure("sentence-transformers",  "sentence_transformers")
 _ensure("yake",                   "yake")
 _ensure("transformers==4.44.0",   "transformers")
 _ensure("gradio==4.42.0",         "gradio")
-_ensure("gradio_client==0.9.1",   "gradio_client")
+# gradio_client is installed automatically as a gradio dependency
 
 import torch
 import numpy as np
