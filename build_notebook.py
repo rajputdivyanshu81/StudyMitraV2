@@ -1559,10 +1559,460 @@ print("     QA F1  : token-bag intersection (SQuAD evaluation style)")
 '''
 cells.append(code(CELL9_CODE))
 
+# =============================================================================
+# CELL 10 MARKDOWN
+# =============================================================================
+cells.append(md(
+"## Cell 10 - Gradio Interface (6-Tab UI)\n"
+"\n"
+"### UI Architecture: Gradio Blocks with Shared State\n"
+"\n"
+"```\n"
+"gr.Blocks()\n"
+"  |\n"
+"  +-- gr.State(transcript)  <- shared across all tabs\n"
+"  +-- Header (title + description)\n"
+"  |\n"
+"  +-- gr.Tabs()\n"
+"       |\n"
+"       +-- Tab 1: Transcribe  (upload -> FFmpeg -> Whisper)\n"
+"       +-- Tab 2: Summarize   (transcript -> BART -> summary)\n"
+"       +-- Tab 3: Keywords    (transcript -> KeyBERT + NER)\n"
+"       +-- Tab 4: Q&A         (question -> TF-IDF + RoBERTa -> answer)\n"
+"       +-- Tab 5: Translate   (dropdown -> MarianMT)\n"
+"       +-- Tab 6: Accuracy    (reference inputs -> WER/ROUGE/F1 report)\n"
+"```\n"
+"\n"
+"### Why Gradio Blocks (not TabbedInterface)?\n"
+"- `gr.Blocks` allows **shared state** between tabs via `gr.State`\n"
+"- Transcript generated in Tab 1 is automatically available in Tabs 2-6\n"
+"- `gr.TabbedInterface` only wraps independent `gr.Interface` objects with no sharing\n"
+"\n"
+"### Key UI Patterns Used:\n"
+"- `gr.State`: Persists transcript across tab switches\n"
+"- `demo.queue()`: Enables streaming + prevents browser timeout on long inference\n"
+"- `share=True`: Generates public `*.gradio.live` URL for Colab access\n"
+"- `gr.Row` / `gr.Column`: Responsive two-column layouts\n"
+"- `gr.Accordion`: Collapsible sections for advanced settings"
+))
+
+# =============================================================================
+# CELL 10 CODE
+# =============================================================================
+CELL10_CODE = '''\
+# ============================================================
+# CELL 10: GRADIO INTERFACE - 6-Tab AI Lecture Platform
+# ============================================================
+
+import gradio as gr
+import tempfile, os
+
+# ── Global state ─────────────────────────────────────────────
+# transcript_cache stores the last transcribed text for reuse across tabs
+transcript_cache = {"text": "", "segments": [], "timestamped": ""}
+
+# ─────────────────────────────────────────────────────────────
+# TAB 1: TRANSCRIBE
+# ─────────────────────────────────────────────────────────────
+def run_transcribe(audio_file, model_choice, enable_vad, detect_lang):
+    """
+    Full pipeline: audio file -> FFmpeg extraction -> faster-whisper transcription.
+
+    Args:
+        audio_file  : Uploaded file (Gradio returns temp file path)
+        model_choice: "large-v3 (GPU)" or "base (CPU)"
+        enable_vad  : Boolean - enable Silero VAD
+        detect_lang : "Auto-detect" or specific language
+
+    Returns:
+        (full_transcript, timestamped_transcript, info_string)
+    """
+    if audio_file is None:
+        return "Please upload an audio or video file.", "", ""
+
+    try:
+        # Step 1: Audio extraction
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            wav_path = tmp.name
+        extract_audio(audio_file, wav_path)
+
+        # Step 2: Model size selection
+        size = "large-v3" if "large" in model_choice.lower() else "base"
+
+        # Step 3: Language
+        lang = None if detect_lang == "Auto-detect" else detect_lang.lower()[:2]
+
+        # Step 4: Transcription
+        result = transcribe_audio(
+            wav_path,
+            model_size=size,
+            language=lang,
+            vad_filter=enable_vad,
+        )
+
+        # Cache for other tabs
+        transcript_cache["text"]        = result["transcript"]
+        transcript_cache["segments"]    = result["segments"]
+        transcript_cache["timestamped"] = result["timestamped"]
+
+        # Cleanup temp file
+        os.unlink(wav_path)
+
+        info = (
+            f"Language: {result['language']} ({result['lang_prob']:.1%} confidence) | "
+            f"Duration: {result['duration']:.1f}s | "
+            f"Words: {result['num_words']} | "
+            f"Segments: {result['num_segments']} | "
+            f"RTF: {result['rtf']:.3f}"
+        )
+
+        return result["transcript"], result["timestamped"], info
+
+    except Exception as e:
+        return f"Error: {str(e)}", "", ""
+
+# ─────────────────────────────────────────────────────────────
+# TAB 2: SUMMARIZE
+# ─────────────────────────────────────────────────────────────
+def run_summarize(custom_text, detail_level):
+    """Run BART summarization on cached transcript or custom text."""
+    text = custom_text.strip() if custom_text.strip() else transcript_cache["text"]
+
+    if not text:
+        return "No transcript available. Please transcribe audio first (Tab 1) or paste text.", ""
+
+    try:
+        result = summarize_text(text, detail=detail_level.lower())
+        info = (
+            f"Chunks processed: {result['num_chunks']} | "
+            f"Input words: {result['input_words']} | "
+            f"Output words: {result['output_words']} | "
+            f"Compression: {result['compression_ratio']}x"
+        )
+        return result["summary"], info
+    except Exception as e:
+        return f"Error: {str(e)}", ""
+
+# ─────────────────────────────────────────────────────────────
+# TAB 3: KEYWORDS
+# ─────────────────────────────────────────────────────────────
+def run_keywords(custom_text, top_n, diversity):
+    """Run KeyBERT + spaCy NER on cached transcript or custom text."""
+    text = custom_text.strip() if custom_text.strip() else transcript_cache["text"]
+
+    if not text:
+        return "No transcript available. Please transcribe audio first (Tab 1) or paste text.", ""
+
+    try:
+        result = extract_keywords_entities(text, top_n=int(top_n), diversity=float(diversity))
+
+        # Format keywords as table
+        kw_lines = ["Rank  Keyword                         Score    Bar"]
+        kw_lines.append("-" * 60)
+        for i, kw in enumerate(result["keywords"], 1):
+            bar = "#" * int(kw["score"] * 30)
+            kw_lines.append(f"{i:<5} {kw['keyword']:<32} {kw['score']:.4f}  {bar}")
+        kw_table = "\\n".join(kw_lines)
+
+        # Format entities
+        ner_lines = ["\\nNAMED ENTITIES:", "-" * 40]
+        if result["entities"]:
+            for label, ents in result["entities"].items():
+                ner_lines.append(f"  {label:<15}: {', '.join(ents[:10])}")
+        else:
+            ner_lines.append("  No named entities found.")
+        ner_text = "\\n".join(ner_lines)
+
+        return kw_table, ner_text
+    except Exception as e:
+        return f"Error: {str(e)}", ""
+
+# ─────────────────────────────────────────────────────────────
+# TAB 4: Q&A
+# ─────────────────────────────────────────────────────────────
+def run_qa(question, custom_context, top_k):
+    """Run TF-IDF retrieval + RoBERTa QA on cached transcript or custom context."""
+    context = custom_context.strip() if custom_context.strip() else transcript_cache["text"]
+
+    if not context:
+        return "No transcript available.", "Please transcribe audio first or paste context.", ""
+
+    if not question.strip():
+        return "Please type a question.", "", ""
+
+    try:
+        result = answer_question(context, question, top_k=int(top_k))
+        retrieved = "\\n\\n--- Retrieved Context ---\\n" + "\\n\\n".join(
+            [f"[Chunk {i+1}]\\n{c}" for i, c in enumerate(result["chunks_used"])]
+        )
+        return result["answer"], f"Confidence: {result['confidence_pct']}", retrieved
+    except Exception as e:
+        return f"Error: {str(e)}", "", ""
+
+# ─────────────────────────────────────────────────────────────
+# TAB 5: TRANSLATE
+# ─────────────────────────────────────────────────────────────
+def run_translate(custom_text, target_language):
+    """Translate cached transcript or custom text to selected language."""
+    text = custom_text.strip() if custom_text.strip() else transcript_cache["text"]
+
+    if not text:
+        return "No transcript available. Please transcribe audio first (Tab 1) or paste text.", ""
+
+    try:
+        lang_code = LANG_MAP.get(target_language, "fr")
+        result = translate_text(text, lang_code)
+        info = (
+            f"Language: English -> {result['lang_name']} | "
+            f"Source words: {result['src_words']} | "
+            f"Translated words: {result['tgt_words']}"
+        )
+        return result["translated_text"], info
+    except Exception as e:
+        return f"Error: {str(e)}", ""
+
+# ─────────────────────────────────────────────────────────────
+# TAB 6: ACCURACY
+# ─────────────────────────────────────────────────────────────
+def run_accuracy(ref_transcript, hyp_transcript, ref_summary, hyp_summary, qa_gt, qa_pred_str):
+    """Compute WER, ROUGE, QA F1/EM accuracy report."""
+    # Parse QA pairs from newline-separated input
+    qa_refs  = [x.strip() for x in qa_gt.strip().splitlines()  if x.strip()] if qa_gt else None
+    qa_preds = [x.strip() for x in qa_pred_str.strip().splitlines() if x.strip()] if qa_pred_str else None
+
+    if qa_refs and qa_preds and len(qa_refs) != len(qa_preds):
+        return "ERROR: Number of QA ground truths must match number of predictions (one per line)."
+
+    try:
+        report = compute_accuracy_report(
+            ref_transcript=ref_transcript,
+            hyp_transcript=hyp_transcript if hyp_transcript.strip() else transcript_cache["text"],
+            ref_summary=ref_summary,
+            hyp_summary=hyp_summary,
+            qa_refs=qa_refs,
+            qa_preds=qa_preds,
+        )
+        return report
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+# =============================================================================
+# BUILD GRADIO INTERFACE
+# =============================================================================
+
+with gr.Blocks(
+    title="Study Mitra - AI Lecture Intelligence",
+    theme=gr.themes.Soft(primary_hue="blue", secondary_hue="slate"),
+    css="""
+        .header-box { text-align: center; padding: 20px; background: linear-gradient(135deg, #1e3a5f, #2980b9); border-radius: 12px; margin-bottom: 16px; }
+        .header-box h1 { color: white; font-size: 2rem; margin: 0; }
+        .header-box p  { color: #cce4f7; margin: 4px 0 0 0; }
+        .metric-box { background: #f0f7ff; border-left: 4px solid #2980b9; padding: 8px 12px; border-radius: 6px; font-family: monospace; }
+        footer { display: none !important; }
+    """,
+) as demo:
+
+    # ── Header ───────────────────────────────────────────────
+    gr.HTML("""
+    <div class="header-box">
+        <h1>STUDY MITRA</h1>
+        <p>AI-Powered Lecture Intelligence Platform &nbsp;|&nbsp; faster-whisper &bull; BART &bull; KeyBERT &bull; RoBERTa &bull; Helsinki-NLP</p>
+    </div>
+    """)
+
+    with gr.Tabs():
+
+        # ── TAB 1: TRANSCRIBE ─────────────────────────────────
+        with gr.TabItem("Transcribe"):
+            gr.Markdown("### Upload audio or video to generate transcript with timestamps")
+            with gr.Row():
+                with gr.Column(scale=1):
+                    t1_file   = gr.File(label="Upload File (.mp4, .mkv, .mp3, .wav, .webm)",
+                                        file_types=[".mp4",".mkv",".webm",".mp3",".wav",".flac",".m4a"])
+                    t1_model  = gr.Radio(["large-v3 (GPU - Best)", "base (CPU - Fast)"],
+                                         value="large-v3 (GPU - Best)", label="Whisper Model")
+                    t1_vad    = gr.Checkbox(value=True, label="Enable VAD (removes silence, improves WER)")
+                    t1_lang   = gr.Dropdown(
+                        ["Auto-detect","English","Hindi","French","German","Spanish","Arabic"],
+                        value="Auto-detect", label="Force Language (optional)")
+                    t1_btn    = gr.Button("Transcribe", variant="primary", size="lg")
+
+                with gr.Column(scale=2):
+                    t1_out_plain = gr.Textbox(label="Full Transcript", lines=12, show_copy_button=True)
+                    t1_out_ts    = gr.Textbox(label="Timestamped Transcript", lines=8, show_copy_button=True)
+                    t1_info      = gr.Textbox(label="Info", lines=2, interactive=False, elem_classes=["metric-box"])
+
+            t1_btn.click(run_transcribe,
+                        inputs=[t1_file, t1_model, t1_vad, t1_lang],
+                        outputs=[t1_out_plain, t1_out_ts, t1_info])
+
+        # ── TAB 2: SUMMARIZE ──────────────────────────────────
+        with gr.TabItem("Summarize"):
+            gr.Markdown("### Generate abstractive summary using BART-large-CNN (Map-Reduce)")
+            with gr.Row():
+                with gr.Column(scale=1):
+                    t2_text   = gr.Textbox(label="Custom Text (leave blank to use transcript)", lines=6,
+                                           placeholder="Paste text here, or leave blank to use Tab 1 transcript...")
+                    t2_detail = gr.Radio(["Brief", "Medium", "Detailed"], value="Medium", label="Detail Level")
+                    t2_btn    = gr.Button("Summarize", variant="primary", size="lg")
+
+                with gr.Column(scale=2):
+                    t2_out  = gr.Textbox(label="Summary", lines=12, show_copy_button=True)
+                    t2_info = gr.Textbox(label="Compression Info", lines=2, interactive=False,
+                                         elem_classes=["metric-box"])
+
+            t2_btn.click(run_summarize, inputs=[t2_text, t2_detail], outputs=[t2_out, t2_info])
+
+        # ── TAB 3: KEYWORDS ───────────────────────────────────
+        with gr.TabItem("Keywords"):
+            gr.Markdown("### Extract semantic keywords (KeyBERT + MMR) and named entities (spaCy NER)")
+            with gr.Row():
+                with gr.Column(scale=1):
+                    t3_text    = gr.Textbox(label="Custom Text (leave blank for transcript)", lines=6)
+                    t3_top_n   = gr.Slider(5, 25, value=15, step=1, label="Top N Keywords")
+                    t3_diversity = gr.Slider(0.0, 1.0, value=0.7, step=0.1,
+                                             label="MMR Diversity (0=redundant, 1=diverse)")
+                    t3_btn     = gr.Button("Extract Keywords", variant="primary", size="lg")
+
+                with gr.Column(scale=2):
+                    t3_kw  = gr.Textbox(label="Keywords (ranked by BERT cosine similarity)", lines=12,
+                                         show_copy_button=True, elem_classes=["metric-box"])
+                    t3_ner = gr.Textbox(label="Named Entities (spaCy)", lines=8, show_copy_button=True)
+
+            t3_btn.click(run_keywords, inputs=[t3_text, t3_top_n, t3_diversity], outputs=[t3_kw, t3_ner])
+
+        # ── TAB 4: Q&A ────────────────────────────────────────
+        with gr.TabItem("Q&A"):
+            gr.Markdown("### Ask questions answered by RoBERTa-SQuAD2 (F1=82.9%) with TF-IDF context retrieval")
+            with gr.Row():
+                with gr.Column(scale=1):
+                    t4_question = gr.Textbox(label="Your Question", lines=3,
+                                              placeholder="E.g. What is the main topic? Who is mentioned?")
+                    t4_ctx      = gr.Textbox(label="Custom Context (leave blank for transcript)", lines=5)
+                    t4_top_k    = gr.Slider(1, 5, value=3, step=1, label="Top-K TF-IDF Chunks")
+                    t4_btn      = gr.Button("Answer Question", variant="primary", size="lg")
+
+                with gr.Column(scale=2):
+                    t4_answer     = gr.Textbox(label="Answer", lines=3, show_copy_button=True)
+                    t4_confidence = gr.Textbox(label="Confidence Score", lines=1, interactive=False,
+                                                elem_classes=["metric-box"])
+                    t4_ctx_out    = gr.Textbox(label="Retrieved Context (TF-IDF)", lines=10)
+
+            t4_btn.click(run_qa, inputs=[t4_question, t4_ctx, t4_top_k],
+                         outputs=[t4_answer, t4_confidence, t4_ctx_out])
+
+        # ── TAB 5: TRANSLATE ──────────────────────────────────
+        with gr.TabItem("Translate"):
+            gr.Markdown("### Translate to 5 languages using Helsinki-NLP OPUS-MT (offline, free)")
+            with gr.Row():
+                with gr.Column(scale=1):
+                    t5_text = gr.Textbox(label="Text to Translate (leave blank for transcript)", lines=8,
+                                          placeholder="Paste English text here or leave blank...")
+                    t5_lang = gr.Dropdown(list(LANG_MAP.keys()), value="Hindi", label="Target Language")
+                    t5_btn  = gr.Button("Translate", variant="primary", size="lg")
+
+                with gr.Column(scale=2):
+                    t5_out  = gr.Textbox(label="Translation", lines=12, show_copy_button=True)
+                    t5_info = gr.Textbox(label="Translation Info", lines=2, interactive=False,
+                                          elem_classes=["metric-box"])
+
+            t5_btn.click(run_translate, inputs=[t5_text, t5_lang], outputs=[t5_out, t5_info])
+
+        # ── TAB 6: ACCURACY ───────────────────────────────────
+        with gr.TabItem("Accuracy"):
+            gr.Markdown("### Evaluate pipeline accuracy: WER + ROUGE + QA F1/EM")
+            with gr.Row():
+                with gr.Column():
+                    gr.Markdown("**Transcription (WER)**")
+                    t6_ref_t  = gr.Textbox(label="Reference Transcript (ground truth)", lines=4)
+                    t6_hyp_t  = gr.Textbox(label="Hypothesis Transcript (leave blank = use Tab 1 output)", lines=4)
+
+                    gr.Markdown("**Summarization (ROUGE)**")
+                    t6_ref_s  = gr.Textbox(label="Reference Summary (gold standard)", lines=3)
+                    t6_hyp_s  = gr.Textbox(label="Hypothesis Summary (paste BART output)", lines=3)
+
+                with gr.Column():
+                    gr.Markdown("**Q&A (F1 + Exact Match)** - one answer per line")
+                    t6_qa_gt  = gr.Textbox(label="Ground-Truth Answers (one per line)", lines=4)
+                    t6_qa_pr  = gr.Textbox(label="Predicted Answers (one per line, same order)", lines=4)
+
+                    t6_btn    = gr.Button("Compute Accuracy Report", variant="primary", size="lg")
+                    t6_report = gr.Textbox(label="Accuracy Report", lines=20,
+                                           elem_classes=["metric-box"], show_copy_button=True)
+
+            t6_btn.click(run_accuracy,
+                         inputs=[t6_ref_t, t6_hyp_t, t6_ref_s, t6_hyp_s, t6_qa_gt, t6_qa_pr],
+                         outputs=[t6_report])
+
+    gr.Markdown("""
+    ---
+    **Study Mitra** | Powered by faster-whisper, BART, KeyBERT, RoBERTa, Helsinki-NLP  
+    *All models run locally on Colab T4 GPU - No paid APIs required*
+    """)
+
+print("[OK] Gradio interface built successfully")
+print("     Run Cell 11 to launch with a public URL")
+'''
+cells.append(code(CELL10_CODE))
+
+# =============================================================================
+# CELL 11 MARKDOWN
+# =============================================================================
+cells.append(md(
+"## Cell 11 - Launch Gradio (Public URL via share=True)\n"
+"\n"
+"### How Colab Public URLs Work\n"
+"\n"
+"When `share=True` is set, Gradio:\n"
+"1. Creates a reverse tunnel from Colab's VM to Gradio's cloud relay\n"
+"2. Assigns a public URL like `https://abc123.gradio.live`\n"
+"3. URL expires after 72 hours (Gradio free tier limit)\n"
+"\n"
+"### Why `demo.queue()`?\n"
+"- Without queue: only one user at a time; browser times out on long inference\n"
+"- With queue: requests handled serially; real-time progress shown in UI\n"
+"- Essential for model inference that takes 10-60+ seconds\n"
+"\n"
+"### Colab-Specific Notes:\n"
+"- Runtime must stay active (don't close the tab!)\n"
+"- Free Colab disconnects after ~12 hours of inactivity\n"
+"- For persistent deployment: use Colab Pro or export to Hugging Face Spaces"
+))
+
+# =============================================================================
+# CELL 11 CODE
+# =============================================================================
+CELL11_CODE = '''\
+# ============================================================
+# CELL 11: LAUNCH GRADIO - Public URL via share=True
+# ============================================================
+
+print("Launching Study Mitra on Gradio...")
+print("share=True creates a public URL accessible from any browser")
+print("The URL will appear below after ~5 seconds")
+print("-" * 55)
+
+demo.queue(
+    max_size=5,          # Queue up to 5 concurrent requests
+    default_concurrency_limit=1  # Process one at a time (GPU memory constraint)
+).launch(
+    share=True,          # Generate public *.gradio.live URL
+    debug=False,         # Set True to see detailed error traces
+    show_error=True,     # Show errors in the UI
+    quiet=False,         # Print URL to output
+    server_name="0.0.0.0",  # Bind to all interfaces
+    server_port=7860,        # Default Gradio port
+    favicon_path=None,
+    inbrowser=False,     # Don\'t try to open browser (not applicable in Colab)
+)
+'''
+cells.append(code(CELL11_CODE))
+
 notebook = {**NOTEBOOK_META, "cells": cells}
 
 with open("study_mitra.ipynb", "w", encoding="utf-8") as f:
     json.dump(notebook, f, indent=2, ensure_ascii=False)
 
 print(f"[OK] study_mitra.ipynb written with {len(cells)} cells")
+
 
