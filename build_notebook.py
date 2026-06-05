@@ -1374,6 +1374,48 @@ def translate_text(text: str, target_lang: str) -> Dict[str, Any]:
     result_text = " ".join(translated_chunks)
     print(f"\\n[Translate] Done: {len(chunks)} chunks -> {len(result_text.split())} words")
 
+    # Post-processing clean up to remove model hallucinations/stutters (e.g. MMMMMMMM or Contsontactacuckt)
+    import re
+    # Collapse any sequence of 3 or more identical characters to a single character
+    result_text = re.sub(r'([a-zA-Z\u0900-\u097F])\1{2,}', r'\1', result_text)
+
+    # Word-level clean up
+    words = result_text.split()
+    cleaned_words = []
+    for w in words:
+        # Strip trailing/leading punctuation to analyze the core token
+        core = re.sub(r'^\W+|\W+$', '', w)
+        if not core:
+            cleaned_words.append(w)
+            continue
+
+        # Rule A: In Hindi, drop long Latin/English gibberish words (>3 chars)
+        if target_lang == 'hi':
+            if re.match(r'^[a-zA-Z]+$', core) and len(core) > 3:
+                continue
+
+        # Rule B: Drop words with heavy internal character repetition patterns (e.g. cugacughughught)
+        if len(core) > 6:
+            has_rep = False
+            for step in [2, 3]:
+                for idx in range(len(core) - step*2):
+                    sub = core[idx:idx+step]
+                    if core.count(sub) >= 3:
+                        has_rep = True
+                        break
+                if has_rep:
+                    break
+            if has_rep:
+                continue
+
+        cleaned_words.append(w)
+
+    result_text = " ".join(cleaned_words)
+    # Clean up excess spaces or dangling commas/punctuations left from deletions
+    result_text = re.sub(r'\s+', ' ', result_text)
+    result_text = re.sub(r'\s+([,.:!?।?])', r'\1', result_text)
+    result_text = result_text.strip()
+
     return {
         "translated_text": result_text,
         "source_lang":     "en",
