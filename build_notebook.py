@@ -2125,6 +2125,9 @@ print("share=True creates a public URL accessible from any browser")
 print("The URL will appear below after ~5 seconds")
 print("-" * 55)
 
+import gradio as gr
+gr.close_all()  # Clean up any previously running Gradio instances on Colab
+
 demo.queue(
     max_size=5,          # Queue up to 5 concurrent requests
     default_concurrency_limit=1  # Process one at a time (GPU memory constraint)
@@ -2134,7 +2137,7 @@ demo.queue(
     show_error=True,     # Show errors in the UI
     quiet=False,         # Print URL to output
     server_name="0.0.0.0",  # Bind to all interfaces
-    server_port=7860,        # Default Gradio port
+    # server_port removed so Gradio auto-selects an available port
     favicon_path=None,
     inbrowser=False,     # Don\'t try to open browser (not applicable in Colab)
 )
