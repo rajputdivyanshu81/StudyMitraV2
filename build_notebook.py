@@ -331,6 +331,7 @@ CELL3_CODE = '''\
 # ============================================================
 
 from pathlib import Path
+import subprocess
 
 SUPPORTED_FORMATS = {".mp4", ".mkv", ".webm", ".mp3", ".wav", ".flac", ".ogg", ".m4a"}
 
