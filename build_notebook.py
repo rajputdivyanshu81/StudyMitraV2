@@ -1311,8 +1311,14 @@ def translate_chunk(text: str, model, tokenizer, max_len: int = 512) -> str:
     inputs = tokenizer(text, return_tensors="pt", padding=True,
                        truncation=True, max_length=max_len).to(DEVICE)
     with torch.no_grad():
-        translated = model.generate(**inputs, num_beams=4, early_stopping=True,
-                                    max_length=max_len)
+        translated = model.generate(
+            **inputs, 
+            num_beams=4, 
+            early_stopping=True,
+            max_length=max_len,
+            repetition_penalty=2.0,
+            no_repeat_ngram_size=3
+        )
     return tokenizer.decode(translated[0], skip_special_tokens=True)
 
 def translate_text(text: str, target_lang: str) -> Dict[str, Any]:
