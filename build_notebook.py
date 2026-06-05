@@ -1347,17 +1347,17 @@ def translate_text(text: str, target_lang: str) -> Dict[str, Any]:
 
     print(f"[Translate] Target: {lang_name} | Input: {len(text.split())} words")
 
-    # Sentence-based chunking
-    sents = sent_tokenize(text)
-    chunks, buf, buf_len = [], [], 0
-    for sent in sents:
-        if buf_len + len(sent) > 400 and buf:
-            chunks.append(" ".join(buf))
-            buf, buf_len = [], 0
-        buf.append(sent)
-        buf_len += len(sent)
-    if buf:
-        chunks.append(" ".join(buf))
+    # Strict length-based chunking (prevents MarianMT hallucination on unpunctuated ASR text)
+    chunks = []
+    current_chunk = ""
+    for word in text.split():
+        if len(current_chunk) + len(word) > 400:
+            chunks.append(current_chunk.strip())
+            current_chunk = word + " "
+        else:
+            current_chunk += word + " "
+    if current_chunk:
+        chunks.append(current_chunk.strip())
 
     # Translate chunk by chunk
     translated_chunks = []
@@ -2045,7 +2045,7 @@ with gr.Blocks(
                 t6_btn = gr.Button("📊 Compute Accuracy Report For Current Session", variant="primary", size="lg")
             
             with gr.Row():
-                t6_report = gr.Textbox(label="Final Report (Copy this for your Professor)", lines=20,
+                t6_report = gr.Textbox(label="Evaluation Report", lines=20,
                                        elem_classes=["metric-box"], show_copy_button=True)
 
             def auto_evaluate_session():
