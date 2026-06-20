@@ -1,4 +1,5 @@
-AI-Powered Lecture Intelligence Tool 🎓
+AI-Powered Lecture Intelligence Tool 
+
 Open In Colab
 
 Overview
@@ -6,8 +7,11 @@ This tool converts video lectures into concise, study-ready notes. It utilizes a
 
 Features
 Video Transcription: Uses OpenAI's Whisper (via Faster-Whisper) for high-accuracy speech-to-text.
+
 Intelligent Summarization: Uses Hugging Face Transformers to condense transcripts into abstractive summaries.
+
 Keyword Extraction: Identifies core concepts automatically.
+
 Interactive UI: Built with Gradio for a seamless web-based experience.
 Tech Stack
 Python
